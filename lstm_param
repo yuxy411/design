@@ -1,0 +1,77 @@
+import keras
+import pandas as pd
+import numpy as np
+from keras.wrappers.scikit_learn import KerasClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
+np.random.seed(1337)
+from keras.preprocessing import sequence
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Activation, Embedding
+from keras.layers import LSTM, SimpleRNN, GRU
+import itertools
+from keras.callbacks import CSVLogger, Callback
+from keras import callbacks
+# from keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau, CSVLogger
+# from sklearn.utils.tests.test_pprint import GridSearchCV
+
+# obtain the label:
+labels = pd.read_csv('datasets/trainlabel.csv', header=None)
+label = labels.iloc[:, 0:1]
+
+# obtain the examples of domain names：
+xx = pd.read_csv('datasets/x_train.txt', header=None)
+x_train, x_test, label_train, label_test = train_test_split(xx, label, test_size=0.3, random_state=42)
+
+# deal with the data：
+Temp = xx.values.tolist()
+Temp = list(itertools.chain(*Temp))
+X = x_train.values.tolist()  # 将数组转换成列表
+X = list(itertools.chain(*X))  # chain('ABC', 'DEF') --> A B C D E F
+T = x_test.values.tolist()
+T = list(itertools.chain(*T))
+
+# Generate a dictionary of valid characters：{'a'：1，'b'：2，..., '_':9}
+valid_chars = {x: idx + 1 for idx, x in enumerate(set(''.join(Temp)))}
+max_features = len(valid_chars) + 1
+maxlen = np.max([len(x) for x in X])
+
+# Convert characters to int and pad:  ——data preprocessing
+X1 = [[valid_chars[y] for y in x] for x in X]
+T11 = [[valid_chars[y] for y in x] for x in T]
+X_train = sequence.pad_sequences(X1, maxlen=maxlen)
+X_test = sequence.pad_sequences(T11, maxlen=maxlen)
+y_train = np.array(label_train)
+y_test = np.array(label_test)
+
+
+def create_model():
+    embedding_vecor_length = 128
+    model = Sequential()
+    model.add(Embedding(max_features, embedding_vecor_length, input_length=maxlen))
+    model.add(LSTM(128))
+    model.add(Dropout(0.1))
+    model.add(Dense(1))
+    model.add(Activation('sigmoid'))
+
+    # optimizer='adam'
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return model
+
+
+
+model = KerasClassifier(build_fn=create_model)
+#使用网格搜索确定超参数
+batch_size=[16,32,64,128]
+epochs=[5,10,30,50,100]
+param_grid=dict(batch_size=batch_size, epochs=epochs)
+grid=GridSearchCV(estimator=model, param_grid=param_grid, n_jobs=1, cv=5, return_train_score=True)
+grid_result=grid.fit(X_train, y_train)
+
+#访问结果
+print('Best=%f, Best_params=%s'% (grid_result.best_score_, grid_result.best_params_))
+means=grid_result.cv_results_['mean_test_score']
+stds=grid_result.cv_results_['std_test_score']
+params=grid_result.cv_results_['params']
+
+for mean, std, param in zip(means, stds, params):
+    print('%f (%f) with: %r' % (mean, std, param))
